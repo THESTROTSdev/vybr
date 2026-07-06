@@ -9,6 +9,8 @@ services:
         value: 10000
       - key: PYTHON_VERSION
         value: 3.11.0
+      - key: WEB_CONCURRENCY
+        value: 1
     plan: free
     healthCheckPath: /
     autoDeploy: true
