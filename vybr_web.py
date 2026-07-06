@@ -1,5 +1,5 @@
 # === vybr_web.py ===
-# VYBR - TikTok Live Tool - Render.com Optimized
+# VYBR - TikTok Live Tool - FULLY WORKING FOR RENDER.COM
 
 import sys
 import os
@@ -39,7 +39,6 @@ app = Flask(__name__)
 app.config['SECRET_KEY'] = 'vybr-secret-key-2024'
 app.config['SESSION_TYPE'] = 'filesystem'
 
-# === SOCKETIO WITH RENDER.COM COMPATIBLE SETTINGS ===
 socketio = SocketIO(
     app,
     cors_allowed_origins='*',
@@ -57,6 +56,7 @@ follow_history = []
 users = set()
 blocked_words = []
 active_username = None
+loop = None
 
 # === HTML TEMPLATE ===
 HTML_TEMPLATE = '''
@@ -542,7 +542,7 @@ HTML_TEMPLATE = '''
     <div class="toast" id="toast"></div>
     <script>
         // ============================================================
-        // CONNECT TO SOCKET - WITH RENDER.COM COMPATIBLE SETTINGS
+        // SOCKET.IO WITH RENDER.COM COMPATIBLE SETTINGS
         // ============================================================
         const socket = io({
             transports: ['websocket', 'polling'],
@@ -581,6 +581,10 @@ HTML_TEMPLATE = '''
         const ttsToggle = $('ttsToggle');
         const voiceSelect = $('voiceSelect');
         const speedSlider = $('speedSlider');
+        const giftTTSToggle = $('giftTTSToggle');
+        const profanityToggle = $('profanityToggle');
+        const spamToggle = $('spamToggle');
+        const autoClearToggle = $('autoClearToggle');
 
         // ============================================================
         // SOCKET EVENTS
@@ -608,7 +612,7 @@ HTML_TEMPLATE = '''
             addFeedItem(data, 'gift');
             giftCount++;
             statGifts.textContent = giftCount;
-            if ($('giftTTSToggle').checked) speak(`${data.user} sent a ${data.gift}`);
+            if (giftTTSToggle.checked) speak(`${data.user} sent a ${data.gift}`);
         });
 
         socket.on('new_follow', (data) => {
@@ -736,14 +740,14 @@ HTML_TEMPLATE = '''
 
             let msg = comment || '';
             if (type === 'comment') {
-                if ($('profanityToggle').checked) {
+                if (profanityToggle.checked) {
                     const profanity = ['fuck', 'shit', 'damn', 'ass', 'bitch', 'cunt'];
                     profanity.forEach(w => {
                         const regex = new RegExp(w, 'gi');
                         msg = msg.replace(regex, '****');
                     });
                 }
-                if ($('spamToggle').checked) {
+                if (spamToggle.checked) {
                     const key = user + ':' + msg.substring(0, 20);
                     if (seen.has(key)) return;
                     seen.add(key);
@@ -775,7 +779,7 @@ HTML_TEMPLATE = '''
             const total = feedMessages.children.length;
             feedCount.textContent = total + ' messages';
 
-            if ($('autoClearToggle').checked && total > 500) {
+            if (autoClearToggle.checked && total > 500) {
                 const last = feedMessages.lastChild;
                 if (last) last.remove();
             }
@@ -919,132 +923,139 @@ HTML_TEMPLATE = '''
 </html>
 '''
 
-# === FLASK ROUTES ===
-def run_tiktok_client(username):
+# === ASYNC TIKTOK CLIENT WRAPPER ===
+def run_tiktok_client_async(username):
     global connected, comment_history, gift_history, follow_history, users, active_username
     
-    try:
-        from TikTokLive import TikTokLiveClient
-        from TikTokLive.events import CommentEvent, GiftEvent, ConnectEvent, DisconnectEvent, FollowEvent
-        
-        active_username = username
-        
-        # Create client with proper settings
-        client = TikTokLiveClient(unique_id=username if username.startswith('@') else '@' + username)
-        
-        @client.on(ConnectEvent)
-        async def on_connect(_):
-            global connected
-            connected = True
-            socketio.emit('connected', {'status': True})
-            socketio.emit('tts_status', {'message': f'Connected to {username}'})
-            print(f"[✓] Connected to {username}")
-        
-        @client.on(DisconnectEvent)
-        async def on_disconnect(_):
-            global connected
-            connected = False
-            socketio.emit('connected', {'status': False})
-            socketio.emit('tts_status', {'message': 'Disconnected'})
-            print("[!] Disconnected")
-        
-        @client.on(CommentEvent)
-        async def on_comment(event):
-            try:
-                # Safely get user info
-                user_obj = getattr(event, 'user', None)
-                if user_obj:
-                    nickname = getattr(user_obj, 'nickname', 'Unknown')
-                else:
-                    nickname = 'Unknown'
-                
-                comment = getattr(event, 'comment', '')
-                
-                if not comment:
-                    return
-                
-                # Check blocked words
-                for word in blocked_words:
-                    if word.lower() in comment.lower():
+    async def run():
+        global connected
+        try:
+            from TikTokLive import TikTokLiveClient
+            from TikTokLive.events import CommentEvent, GiftEvent, ConnectEvent, DisconnectEvent, FollowEvent
+            
+            active_username = username
+            client = TikTokLiveClient(unique_id=username if username.startswith('@') else '@' + username)
+            
+            @client.on(ConnectEvent)
+            async def on_connect(_):
+                global connected
+                connected = True
+                socketio.emit('connected', {'status': True})
+                print(f"[✓] Connected to {username}")
+            
+            @client.on(DisconnectEvent)
+            async def on_disconnect(_):
+                global connected
+                connected = False
+                socketio.emit('connected', {'status': False})
+                print("[!] Disconnected")
+            
+            @client.on(CommentEvent)
+            async def on_comment(event):
+                try:
+                    user_obj = getattr(event, 'user', None)
+                    if user_obj:
+                        nickname = getattr(user_obj, 'nickname', 'Unknown')
+                    else:
+                        nickname = 'Unknown'
+                    
+                    comment = getattr(event, 'comment', '')
+                    
+                    if not comment:
                         return
-                
-                entry = {
-                    'user': nickname,
-                    'comment': comment,
-                    'timestamp': time.time(),
-                    'source': 'tiktok'
-                }
-                comment_history.append(entry)
-                users.add(nickname)
-                socketio.emit('new_comment', entry)
-                print(f"[Comment] {nickname}: {comment}")
-                
-            except Exception as e:
-                print(f"[!] Comment error: {e}")
-        
-        @client.on(GiftEvent)
-        async def on_gift(event):
-            try:
-                user_obj = getattr(event, 'user', None)
-                if user_obj:
-                    nickname = getattr(user_obj, 'nickname', 'Unknown')
-                else:
-                    nickname = 'Unknown'
-                
-                gift_obj = getattr(event, 'gift', None)
-                if gift_obj:
-                    gift_name = getattr(gift_obj, 'name', 'Gift')
-                    count = getattr(gift_obj, 'count', 1)
-                else:
-                    gift_name = 'Gift'
-                    count = 1
-                
-                entry = {
-                    'user': nickname,
-                    'gift': gift_name,
-                    'count': count,
-                    'timestamp': time.time(),
-                    'source': 'tiktok'
-                }
-                gift_history.append(entry)
-                users.add(nickname)
-                socketio.emit('new_gift', entry)
-                print(f"[Gift] {nickname} sent {count}x {gift_name}")
-                
-            except Exception as e:
-                print(f"[!] Gift error: {e}")
-        
-        @client.on(FollowEvent)
-        async def on_follow(event):
-            try:
-                user_obj = getattr(event, 'user', None)
-                if user_obj:
-                    nickname = getattr(user_obj, 'nickname', 'Unknown')
-                else:
-                    nickname = 'Unknown'
-                
-                entry = {
-                    'user': nickname,
-                    'timestamp': time.time(),
-                    'source': 'tiktok'
-                }
-                follow_history.append(entry)
-                users.add(nickname)
-                socketio.emit('new_follow', entry)
-                print(f"[Follow] {nickname} followed!")
-                
-            except Exception as e:
-                print(f"[!] Follow error: {e}")
-        
-        print(f"[*] Starting TikTok client for {username}...")
-        await client.run()
-        
-    except Exception as e:
-        connected = False
-        socketio.emit('error', {'message': str(e)})
-        socketio.emit('tts_status', {'message': f'Error: {str(e)}'})
-        print(f"[!] Client error: {e}")
+                    
+                    for word in blocked_words:
+                        if word.lower() in comment.lower():
+                            return
+                    
+                    entry = {
+                        'user': nickname,
+                        'comment': comment,
+                        'timestamp': time.time(),
+                        'source': 'tiktok'
+                    }
+                    comment_history.append(entry)
+                    users.add(nickname)
+                    socketio.emit('new_comment', entry)
+                    print(f"[Comment] {nickname}: {comment}")
+                    
+                except Exception as e:
+                    print(f"[!] Comment error: {e}")
+            
+            @client.on(GiftEvent)
+            async def on_gift(event):
+                try:
+                    user_obj = getattr(event, 'user', None)
+                    if user_obj:
+                        nickname = getattr(user_obj, 'nickname', 'Unknown')
+                    else:
+                        nickname = 'Unknown'
+                    
+                    gift_obj = getattr(event, 'gift', None)
+                    if gift_obj:
+                        gift_name = getattr(gift_obj, 'name', 'Gift')
+                        count = getattr(gift_obj, 'count', 1)
+                    else:
+                        gift_name = 'Gift'
+                        count = 1
+                    
+                    entry = {
+                        'user': nickname,
+                        'gift': gift_name,
+                        'count': count,
+                        'timestamp': time.time(),
+                        'source': 'tiktok'
+                    }
+                    gift_history.append(entry)
+                    users.add(nickname)
+                    socketio.emit('new_gift', entry)
+                    print(f"[Gift] {nickname} sent {count}x {gift_name}")
+                    
+                except Exception as e:
+                    print(f"[!] Gift error: {e}")
+            
+            @client.on(FollowEvent)
+            async def on_follow(event):
+                try:
+                    user_obj = getattr(event, 'user', None)
+                    if user_obj:
+                        nickname = getattr(user_obj, 'nickname', 'Unknown')
+                    else:
+                        nickname = 'Unknown'
+                    
+                    entry = {
+                        'user': nickname,
+                        'timestamp': time.time(),
+                        'source': 'tiktok'
+                    }
+                    follow_history.append(entry)
+                    users.add(nickname)
+                    socketio.emit('new_follow', entry)
+                    print(f"[Follow] {nickname} followed!")
+                    
+                except Exception as e:
+                    print(f"[!] Follow error: {e}")
+            
+            print(f"[*] Starting TikTok client for {username}...")
+            await client.run()
+            
+        except Exception as e:
+            connected = False
+            socketio.emit('error', {'message': str(e)})
+            print(f"[!] Client error: {e}")
+    
+    # Create new event loop and run
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(run())
 
+def run_tiktok_client(username):
+    """Wrapper to run async client in a thread"""
+    thread = threading.Thread(target=run_tiktok_client_async, args=(username,), daemon=True)
+    thread.start()
+    return thread
+
+# === FLASK ROUTES ===
 @app.route('/')
 def index():
     return render_template_string(HTML_TEMPLATE)
@@ -1062,15 +1073,13 @@ def api_connect():
     if not username:
         return jsonify({'success': False, 'error': 'No username provided'})
     
-    # Remove @ if present
     if username.startswith('@'):
         username = username[1:]
     
     active_username = username
     
     # Start client in background thread
-    client_thread = threading.Thread(target=run_tiktok_client, args=(username,), daemon=True)
-    client_thread.start()
+    client_thread = run_tiktok_client(username)
     
     # Wait a moment for connection
     time.sleep(2)
