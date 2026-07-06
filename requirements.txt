@@ -3,3 +3,4 @@ flask-socketio==5.3.6
 eventlet==0.33.3
 requests==2.31.0
 TikTokLive==6.6.5
+websocket-client==1.6.1
