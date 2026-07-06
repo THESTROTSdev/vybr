@@ -1,5 +1,5 @@
 # === vybr_web.py ===
-# VYBR - TikTok Live Tool - FULLY WORKING
+# VYBR - TikTok Live Tool - Render.com Optimized
 
 import sys
 import os
@@ -37,7 +37,17 @@ import eventlet
 # === GLOBALS ===
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'vybr-secret-key-2024'
-socketio = SocketIO(app, cors_allowed_origins='*', async_mode='eventlet')
+app.config['SESSION_TYPE'] = 'filesystem'
+
+# === SOCKETIO WITH RENDER.COM COMPATIBLE SETTINGS ===
+socketio = SocketIO(
+    app,
+    cors_allowed_origins='*',
+    async_mode='eventlet',
+    ping_timeout=60,
+    ping_interval=25,
+    max_http_buffer_size=1e6
+)
 
 connected = False
 client_thread = None
@@ -532,9 +542,17 @@ HTML_TEMPLATE = '''
     <div class="toast" id="toast"></div>
     <script>
         // ============================================================
-        // CONNECT TO SOCKET
+        // CONNECT TO SOCKET - WITH RENDER.COM COMPATIBLE SETTINGS
         // ============================================================
-        const socket = io();
+        const socket = io({
+            transports: ['websocket', 'polling'],
+            upgrade: true,
+            rememberUpgrade: true,
+            reconnection: true,
+            reconnectionAttempts: 10,
+            reconnectionDelay: 1000,
+            timeout: 20000
+        });
 
         // ============================================================
         // STATE
@@ -568,17 +586,17 @@ HTML_TEMPLATE = '''
         // SOCKET EVENTS
         // ============================================================
         socket.on('connect', () => {
+            console.log('[Socket] Connected to server');
             showToast('Connected to server', 'success');
-            console.log('[Socket] Connected');
         });
 
         socket.on('disconnect', () => {
+            console.log('[Socket] Disconnected from server');
             showToast('Disconnected from server', 'error');
-            console.log('[Socket] Disconnected');
         });
 
         socket.on('new_comment', (data) => {
-            console.log('[Socket] New comment:', data);
+            console.log('[Socket] Comment:', data.user, data.comment);
             addFeedItem(data, 'comment');
             commentCount++;
             statComments.textContent = commentCount;
@@ -586,7 +604,7 @@ HTML_TEMPLATE = '''
         });
 
         socket.on('new_gift', (data) => {
-            console.log('[Socket] New gift:', data);
+            console.log('[Socket] Gift:', data.user, data.gift);
             addFeedItem(data, 'gift');
             giftCount++;
             statGifts.textContent = giftCount;
@@ -594,20 +612,16 @@ HTML_TEMPLATE = '''
         });
 
         socket.on('new_follow', (data) => {
-            console.log('[Socket] New follow:', data);
+            console.log('[Socket] Follow:', data.user);
             addFeedItem(data, 'follow');
             followCount++;
             statFollows.textContent = followCount;
             speak(`${data.user} just followed!`);
         });
 
-        socket.on('connected', (data) => {
-            console.log('[Socket] Connected event:', data);
-        });
-
-        socket.on('error', (data) => {
-            console.log('[Socket] Error:', data);
-            showToast('Error: ' + data.message, 'error');
+        socket.on('connect_error', (error) => {
+            console.error('[Socket] Connection error:', error);
+            showToast('Socket connection error', 'error');
         });
 
         // ============================================================
@@ -653,6 +667,7 @@ HTML_TEMPLATE = '''
                     statusLabel.className = 'status connected';
                     showToast('Connected to ' + username, 'success');
                     connectionStart = Date.now();
+                    if (connectionTimer) clearInterval(connectionTimer);
                     connectionTimer = setInterval(updateOnlineTime, 1000);
                 } else {
                     connectBtn.textContent = 'CONNECT LIVE';
@@ -669,7 +684,7 @@ HTML_TEMPLATE = '''
                 connectBtn.className = 'btn-primary';
                 statusLabel.textContent = '● Disconnected';
                 statusLabel.className = 'status disconnected';
-                showToast('Connection failed', 'error');
+                showToast('Connection failed: ' + err.message, 'error');
             });
         }
 
@@ -683,8 +698,10 @@ HTML_TEMPLATE = '''
                 statusLabel.textContent = '● Disconnected';
                 statusLabel.className = 'status disconnected';
                 showToast('Disconnected', 'error');
-                clearInterval(connectionTimer);
-                connectionTimer = null;
+                if (connectionTimer) {
+                    clearInterval(connectionTimer);
+                    connectionTimer = null;
+                }
                 statOnline.textContent = '0h 0m';
             });
         }
@@ -831,25 +848,31 @@ HTML_TEMPLATE = '''
         // TTS (Speech Synthesis)
         // ============================================================
         function speak(text) {
-            if (!window.speechSynthesis) return;
-            const utterance = new SpeechSynthesisUtterance(text);
-            const voices = window.speechSynthesis.getVoices();
-            const selected = voices.find(v => v.name.includes(voiceSelect.value));
-            if (selected) utterance.voice = selected;
-            utterance.rate = parseInt(speedSlider.value) / 100;
-            window.speechSynthesis.speak(utterance);
+            try {
+                if (!window.speechSynthesis) return;
+                const utterance = new SpeechSynthesisUtterance(text);
+                const voices = window.speechSynthesis.getVoices();
+                const selected = voices.find(v => v.name.includes(voiceSelect.value));
+                if (selected) utterance.voice = selected;
+                utterance.rate = parseInt(speedSlider.value) / 100;
+                window.speechSynthesis.speak(utterance);
+            } catch (e) {
+                console.log('[TTS] Error:', e);
+            }
         }
 
         // Load voices when they change
-        window.speechSynthesis.onvoiceschanged = () => {
-            const voices = window.speechSynthesis.getVoices();
-            const select = voiceSelect;
-            const options = select.querySelectorAll('option');
-            options.forEach(opt => {
-                const match = voices.find(v => v.name.includes(opt.text.split('(')[0].trim()));
-                if (match) opt.value = match.name;
-            });
-        };
+        if (window.speechSynthesis) {
+            window.speechSynthesis.onvoiceschanged = () => {
+                const voices = window.speechSynthesis.getVoices();
+                const select = voiceSelect;
+                const options = select.querySelectorAll('option');
+                options.forEach(opt => {
+                    const match = voices.find(v => v.name.includes(opt.text.split('(')[0].trim()));
+                    if (match) opt.value = match.name;
+                });
+            };
+        }
 
         // ============================================================
         // TOAST
@@ -905,6 +928,8 @@ def run_tiktok_client(username):
         from TikTokLive.events import CommentEvent, GiftEvent, ConnectEvent, DisconnectEvent, FollowEvent
         
         active_username = username
+        
+        # Create client with proper settings
         client = TikTokLiveClient(unique_id=username if username.startswith('@') else '@' + username)
         
         @client.on(ConnectEvent)
@@ -912,6 +937,7 @@ def run_tiktok_client(username):
             global connected
             connected = True
             socketio.emit('connected', {'status': True})
+            socketio.emit('tts_status', {'message': f'Connected to {username}'})
             print(f"[✓] Connected to {username}")
         
         @client.on(DisconnectEvent)
@@ -919,12 +945,19 @@ def run_tiktok_client(username):
             global connected
             connected = False
             socketio.emit('connected', {'status': False})
+            socketio.emit('tts_status', {'message': 'Disconnected'})
             print("[!] Disconnected")
         
         @client.on(CommentEvent)
         async def on_comment(event):
             try:
-                user = getattr(event.user, 'nickname', 'Unknown')
+                # Safely get user info
+                user_obj = getattr(event, 'user', None)
+                if user_obj:
+                    nickname = getattr(user_obj, 'nickname', 'Unknown')
+                else:
+                    nickname = 'Unknown'
+                
                 comment = getattr(event, 'comment', '')
                 
                 if not comment:
@@ -936,15 +969,15 @@ def run_tiktok_client(username):
                         return
                 
                 entry = {
-                    'user': user,
+                    'user': nickname,
                     'comment': comment,
                     'timestamp': time.time(),
                     'source': 'tiktok'
                 }
                 comment_history.append(entry)
-                users.add(user)
+                users.add(nickname)
                 socketio.emit('new_comment', entry)
-                print(f"[Comment] {user}: {comment}")
+                print(f"[Comment] {nickname}: {comment}")
                 
             except Exception as e:
                 print(f"[!] Comment error: {e}")
@@ -952,21 +985,31 @@ def run_tiktok_client(username):
         @client.on(GiftEvent)
         async def on_gift(event):
             try:
-                user = getattr(event.user, 'nickname', 'Unknown')
-                gift = getattr(event.gift, 'name', 'Gift')
-                count = getattr(event.gift, 'count', 1)
+                user_obj = getattr(event, 'user', None)
+                if user_obj:
+                    nickname = getattr(user_obj, 'nickname', 'Unknown')
+                else:
+                    nickname = 'Unknown'
+                
+                gift_obj = getattr(event, 'gift', None)
+                if gift_obj:
+                    gift_name = getattr(gift_obj, 'name', 'Gift')
+                    count = getattr(gift_obj, 'count', 1)
+                else:
+                    gift_name = 'Gift'
+                    count = 1
                 
                 entry = {
-                    'user': user,
-                    'gift': gift,
+                    'user': nickname,
+                    'gift': gift_name,
                     'count': count,
                     'timestamp': time.time(),
                     'source': 'tiktok'
                 }
                 gift_history.append(entry)
-                users.add(user)
+                users.add(nickname)
                 socketio.emit('new_gift', entry)
-                print(f"[Gift] {user} sent {count}x {gift}")
+                print(f"[Gift] {nickname} sent {count}x {gift_name}")
                 
             except Exception as e:
                 print(f"[!] Gift error: {e}")
@@ -974,27 +1017,32 @@ def run_tiktok_client(username):
         @client.on(FollowEvent)
         async def on_follow(event):
             try:
-                user = getattr(event.user, 'nickname', 'Unknown')
+                user_obj = getattr(event, 'user', None)
+                if user_obj:
+                    nickname = getattr(user_obj, 'nickname', 'Unknown')
+                else:
+                    nickname = 'Unknown'
                 
                 entry = {
-                    'user': user,
+                    'user': nickname,
                     'timestamp': time.time(),
                     'source': 'tiktok'
                 }
                 follow_history.append(entry)
-                users.add(user)
+                users.add(nickname)
                 socketio.emit('new_follow', entry)
-                print(f"[Follow] {user} followed!")
+                print(f"[Follow] {nickname} followed!")
                 
             except Exception as e:
                 print(f"[!] Follow error: {e}")
         
         print(f"[*] Starting TikTok client for {username}...")
-        asyncio.run(client.run())
+        await client.run()
         
     except Exception as e:
         connected = False
         socketio.emit('error', {'message': str(e)})
+        socketio.emit('tts_status', {'message': f'Error: {str(e)}'})
         print(f"[!] Client error: {e}")
 
 @app.route('/')
@@ -1014,15 +1062,18 @@ def api_connect():
     if not username:
         return jsonify({'success': False, 'error': 'No username provided'})
     
+    # Remove @ if present
     if username.startswith('@'):
         username = username[1:]
     
     active_username = username
     
+    # Start client in background thread
     client_thread = threading.Thread(target=run_tiktok_client, args=(username,), daemon=True)
     client_thread.start()
     
-    time.sleep(1)
+    # Wait a moment for connection
+    time.sleep(2)
     
     return jsonify({'success': True, 'message': f'Connecting to {username}...'})
 
@@ -1072,4 +1123,11 @@ if __name__ == '__main__':
     print(f"\n Server running on port {port}")
     print("=" * 60)
     
-    socketio.run(app, host='0.0.0.0', port=port, debug=False, allow_unsafe_werkzeug=True)
+    socketio.run(
+        app,
+        host='0.0.0.0',
+        port=port,
+        debug=False,
+        allow_unsafe_werkzeug=True,
+        log_output=True
+    )
