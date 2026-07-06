@@ -1,5 +1,5 @@
 # === vybr_web.py ===
-# VYBR - TikTok Live Tool - Fully Working
+# VYBR - TikTok Live Tool - FULLY WORKING
 
 import sys
 import os
@@ -531,77 +531,161 @@ HTML_TEMPLATE = '''
     </div>
     <div class="toast" id="toast"></div>
     <script>
+        // ============================================================
+        // CONNECT TO SOCKET
+        // ============================================================
         const socket = io();
+
+        // ============================================================
+        // STATE
+        // ============================================================
         let connected = false;
-        let commentCount = 0, giftCount = 0, followCount = 0;
+        let commentCount = 0;
+        let giftCount = 0;
+        let followCount = 0;
         let seen = new Set();
         let connectionStart = null;
         let connectionTimer = null;
 
+        // ============================================================
+        // DOM REFS
+        // ============================================================
         const $ = id => document.getElementById(id);
         const feedMessages = $('feedMessages');
         const feedCount = $('feedCount');
+        const statusLabel = $('statusLabel');
+        const connectBtn = $('connectBtn');
+        const usernameInput = $('usernameInput');
+        const statComments = $('statComments');
+        const statGifts = $('statGifts');
+        const statFollows = $('statFollows');
+        const statOnline = $('statOnline');
+        const ttsToggle = $('ttsToggle');
+        const voiceSelect = $('voiceSelect');
+        const speedSlider = $('speedSlider');
 
-        socket.on('connect', () => showToast('Connected to server', 'success'));
-        socket.on('disconnect', () => showToast('Disconnected', 'error'));
-        socket.on('new_comment', (data) => { addFeedItem(data, 'comment'); commentCount++; $('statComments').textContent = commentCount; });
-        socket.on('new_gift', (data) => { addFeedItem(data, 'gift'); giftCount++; $('statGifts').textContent = giftCount; if ($('giftTTSToggle').checked) speak(`${data.user} sent a ${data.gift}`); });
-        socket.on('new_follow', (data) => { addFeedItem(data, 'follow'); followCount++; $('statFollows').textContent = followCount; speak(`${data.user} just followed!`); });
+        // ============================================================
+        // SOCKET EVENTS
+        // ============================================================
+        socket.on('connect', () => {
+            showToast('Connected to server', 'success');
+            console.log('[Socket] Connected');
+        });
 
+        socket.on('disconnect', () => {
+            showToast('Disconnected from server', 'error');
+            console.log('[Socket] Disconnected');
+        });
+
+        socket.on('new_comment', (data) => {
+            console.log('[Socket] New comment:', data);
+            addFeedItem(data, 'comment');
+            commentCount++;
+            statComments.textContent = commentCount;
+            if (ttsToggle.checked) speak(`${data.user} says: ${data.comment}`);
+        });
+
+        socket.on('new_gift', (data) => {
+            console.log('[Socket] New gift:', data);
+            addFeedItem(data, 'gift');
+            giftCount++;
+            statGifts.textContent = giftCount;
+            if ($('giftTTSToggle').checked) speak(`${data.user} sent a ${data.gift}`);
+        });
+
+        socket.on('new_follow', (data) => {
+            console.log('[Socket] New follow:', data);
+            addFeedItem(data, 'follow');
+            followCount++;
+            statFollows.textContent = followCount;
+            speak(`${data.user} just followed!`);
+        });
+
+        socket.on('connected', (data) => {
+            console.log('[Socket] Connected event:', data);
+        });
+
+        socket.on('error', (data) => {
+            console.log('[Socket] Error:', data);
+            showToast('Error: ' + data.message, 'error');
+        });
+
+        // ============================================================
+        // CONNECTION FUNCTIONS
+        // ============================================================
         function toggleConnection() {
-            if (connected) { disconnect(); } else { connect(); }
+            console.log('[UI] Toggle connection, current state:', connected);
+            if (connected) {
+                disconnect();
+            } else {
+                connect();
+            }
         }
 
         function connect() {
-            const username = $('usernameInput').value.trim();
-            if (!username) { showToast('Enter a username', 'error'); return; }
-            $('connectBtn').disabled = true;
-            $('connectBtn').textContent = 'CONNECTING...';
-            $('statusLabel').textContent = '● Connecting...';
-            $('statusLabel').className = 'status connecting';
+            const username = usernameInput.value.trim();
+            if (!username) {
+                showToast('Enter a username', 'error');
+                return;
+            }
+
+            console.log('[UI] Connecting to:', username);
+
+            connectBtn.disabled = true;
+            connectBtn.textContent = 'CONNECTING...';
+            statusLabel.textContent = '● Connecting...';
+            statusLabel.className = 'status connecting';
+
             fetch('/api/connect', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ username })
-            }).then(res => res.json()).then(data => {
-                $('connectBtn').disabled = false;
+                body: JSON.stringify({ username: username })
+            })
+            .then(res => res.json())
+            .then(data => {
+                console.log('[API] Connect response:', data);
+                connectBtn.disabled = false;
                 if (data.success) {
                     connected = true;
-                    $('connectBtn').textContent = 'DISCONNECT';
-                    $('connectBtn').className = 'btn-primary btn-secondary';
-                    $('statusLabel').textContent = '● Connected';
-                    $('statusLabel').className = 'status connected';
+                    connectBtn.textContent = 'DISCONNECT';
+                    connectBtn.className = 'btn-primary btn-secondary';
+                    statusLabel.textContent = '● Connected';
+                    statusLabel.className = 'status connected';
                     showToast('Connected to ' + username, 'success');
                     connectionStart = Date.now();
                     connectionTimer = setInterval(updateOnlineTime, 1000);
                 } else {
-                    $('connectBtn').textContent = 'CONNECT LIVE';
-                    $('connectBtn').className = 'btn-primary';
-                    $('statusLabel').textContent = '● Disconnected';
-                    $('statusLabel').className = 'status disconnected';
+                    connectBtn.textContent = 'CONNECT LIVE';
+                    connectBtn.className = 'btn-primary';
+                    statusLabel.textContent = '● Disconnected';
+                    statusLabel.className = 'status disconnected';
                     showToast('Failed: ' + (data.error || 'Unknown'), 'error');
                 }
-            }).catch(() => {
-                $('connectBtn').disabled = false;
-                $('connectBtn').textContent = 'CONNECT LIVE';
-                $('connectBtn').className = 'btn-primary';
-                $('statusLabel').textContent = '● Disconnected';
-                $('statusLabel').className = 'status disconnected';
+            })
+            .catch((err) => {
+                console.error('[API] Connect error:', err);
+                connectBtn.disabled = false;
+                connectBtn.textContent = 'CONNECT LIVE';
+                connectBtn.className = 'btn-primary';
+                statusLabel.textContent = '● Disconnected';
+                statusLabel.className = 'status disconnected';
                 showToast('Connection failed', 'error');
             });
         }
 
         function disconnect() {
-            fetch('/api/disconnect', { method: 'POST' }).then(() => {
+            console.log('[UI] Disconnecting...');
+            fetch('/api/disconnect', { method: 'POST' })
+            .then(() => {
                 connected = false;
-                $('connectBtn').textContent = 'CONNECT LIVE';
-                $('connectBtn').className = 'btn-primary';
-                $('statusLabel').textContent = '● Disconnected';
-                $('statusLabel').className = 'status disconnected';
+                connectBtn.textContent = 'CONNECT LIVE';
+                connectBtn.className = 'btn-primary';
+                statusLabel.textContent = '● Disconnected';
+                statusLabel.className = 'status disconnected';
                 showToast('Disconnected', 'error');
                 clearInterval(connectionTimer);
                 connectionTimer = null;
-                $('statOnline').textContent = '0h 0m';
+                statOnline.textContent = '0h 0m';
             });
         }
 
@@ -610,27 +694,37 @@ HTML_TEMPLATE = '''
                 const elapsed = Math.floor((Date.now() - connectionStart) / 1000);
                 const hours = Math.floor(elapsed / 3600);
                 const minutes = Math.floor((elapsed % 3600) / 60);
-                $('statOnline').textContent = `${String(hours).padStart(2, '0')}h ${String(minutes).padStart(2, '0')}m`;
+                statOnline.textContent = `${String(hours).padStart(2, '0')}h ${String(minutes).padStart(2, '0')}m`;
             }
         }
 
+        // ============================================================
+        // FEED FUNCTIONS
+        // ============================================================
         function getColor(username) {
             const colors = ['#6c5ce7', '#74b9ff', '#fdcb6e', '#55efc4', '#fd79a8', '#a29bfe', '#00b894', '#e17055', '#00cec9', '#e84393'];
             let hash = 0;
-            for (let i = 0; i < username.length; i++) hash = username.charCodeAt(i) + ((hash << 5) - hash);
+            for (let i = 0; i < username.length; i++) {
+                hash = username.charCodeAt(i) + ((hash << 5) - hash);
+            }
             return colors[Math.abs(hash) % colors.length];
         }
 
         function addFeedItem(data, type) {
+            console.log('[Feed] Adding item:', type, data);
             const { user, comment, gift, count, timestamp } = data;
             const time = new Date(timestamp * 1000).toLocaleTimeString();
             const color = getColor(user);
             const avatar = user.charAt(0).toUpperCase();
+
             let msg = comment || '';
             if (type === 'comment') {
                 if ($('profanityToggle').checked) {
                     const profanity = ['fuck', 'shit', 'damn', 'ass', 'bitch', 'cunt'];
-                    profanity.forEach(w => { const regex = new RegExp(w, 'gi'); msg = msg.replace(regex, '****'); });
+                    profanity.forEach(w => {
+                        const regex = new RegExp(w, 'gi');
+                        msg = msg.replace(regex, '****');
+                    });
                 }
                 if ($('spamToggle').checked) {
                     const key = user + ':' + msg.substring(0, 20);
@@ -639,10 +733,15 @@ HTML_TEMPLATE = '''
                     if (seen.size > 1000) seen.clear();
                 }
             }
+
             let msgHTML = '';
-            if (type === 'gift') msgHTML = `<span class="msg gift">🎁 sent ${count}x ${gift}</span>`;
-            else if (type === 'follow') msgHTML = `<span class="msg follow">just followed!</span>`;
-            else msgHTML = `<span class="msg">${msg}</span>`;
+            if (type === 'gift') {
+                msgHTML = `<span class="msg gift">🎁 sent ${count}x ${gift}</span>`;
+            } else if (type === 'follow') {
+                msgHTML = `<span class="msg follow">just followed!</span>`;
+            } else {
+                msgHTML = `<span class="msg">${msg}</span>`;
+            }
 
             const item = document.createElement('div');
             item.className = 'feed-item';
@@ -655,30 +754,40 @@ HTML_TEMPLATE = '''
                 <span class="time">${time}</span>
             `;
             feedMessages.prepend(item);
+
             const total = feedMessages.children.length;
             feedCount.textContent = total + ' messages';
+
             if ($('autoClearToggle').checked && total > 500) {
                 const last = feedMessages.lastChild;
                 if (last) last.remove();
             }
-            if (type === 'comment' && $('ttsToggle').checked) speak(`${user} says: ${msg}`);
         }
 
         function clearFeed() {
+            console.log('[UI] Clearing feed');
             feedMessages.innerHTML = '';
             feedCount.textContent = '0 messages';
-            commentCount = 0; giftCount = 0; followCount = 0;
-            $('statComments').textContent = '0';
-            $('statGifts').textContent = '0';
-            $('statFollows').textContent = '0';
+            commentCount = 0;
+            giftCount = 0;
+            followCount = 0;
+            statComments.textContent = '0';
+            statGifts.textContent = '0';
+            statFollows.textContent = '0';
             seen.clear();
             showToast('Feed cleared', 'success');
         }
 
+        // ============================================================
+        // EXPORT LOGS
+        // ============================================================
         function exportLogs() {
+            console.log('[UI] Exporting logs');
             const items = feedMessages.querySelectorAll('.feed-item');
             let text = 'VYBR Logs\n' + new Date().toLocaleString() + '\n\n';
-            items.forEach(item => text += item.textContent.trim() + '\n');
+            items.forEach(item => {
+                text += item.textContent.trim() + '\n';
+            });
             const blob = new Blob([text], { type: 'text/plain' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -689,53 +798,99 @@ HTML_TEMPLATE = '''
             showToast('Logs exported', 'success');
         }
 
+        // ============================================================
+        // MANUAL MESSAGE
+        // ============================================================
         function sendManual() {
             const user = $('manualUser').value.trim() || 'Manual';
             const msg = $('manualMsg').value.trim();
-            if (!msg) return;
+            if (!msg) {
+                showToast('Enter a message', 'error');
+                return;
+            }
+
+            console.log('[UI] Sending manual message:', user, msg);
+
             fetch('/api/manual', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ user, message: msg })
-            }).then(() => {
+                body: JSON.stringify({ user: user, message: msg })
+            })
+            .then(res => res.json())
+            .then(() => {
                 $('manualMsg').value = '';
                 showToast('Message sent', 'success');
+            })
+            .catch(err => {
+                console.error('[API] Manual message error:', err);
+                showToast('Failed to send message', 'error');
             });
         }
 
+        // ============================================================
+        // TTS (Speech Synthesis)
+        // ============================================================
         function speak(text) {
             if (!window.speechSynthesis) return;
             const utterance = new SpeechSynthesisUtterance(text);
             const voices = window.speechSynthesis.getVoices();
-            const selected = voices.find(v => v.name.includes($('voiceSelect').value));
+            const selected = voices.find(v => v.name.includes(voiceSelect.value));
             if (selected) utterance.voice = selected;
-            utterance.rate = parseInt($('speedSlider').value) / 100;
+            utterance.rate = parseInt(speedSlider.value) / 100;
             window.speechSynthesis.speak(utterance);
         }
 
-        function showToast(message, type) {
-            const toast = $('toast');
-            toast.textContent = message;
-            toast.className = 'toast ' + type;
-            toast.classList.add('show');
-            clearTimeout(toast._timeout);
-            toast._timeout = setTimeout(() => toast.classList.remove('show'), 3000);
-        }
-
-        document.addEventListener('keydown', (e) => {
-            if (e.ctrlKey && e.key === 'Enter') { e.preventDefault(); sendManual(); }
-            if (e.ctrlKey && e.key === 'c' && !e.target.closest('input')) clearFeed();
-        });
-
+        // Load voices when they change
         window.speechSynthesis.onvoiceschanged = () => {
             const voices = window.speechSynthesis.getVoices();
-            const select = $('voiceSelect');
+            const select = voiceSelect;
             const options = select.querySelectorAll('option');
             options.forEach(opt => {
                 const match = voices.find(v => v.name.includes(opt.text.split('(')[0].trim()));
                 if (match) opt.value = match.name;
             });
         };
+
+        // ============================================================
+        // TOAST
+        // ============================================================
+        function showToast(message, type = 'info') {
+            console.log('[UI] Toast:', message, type);
+            const toast = $('toast');
+            toast.textContent = message;
+            toast.className = 'toast ' + type;
+            toast.classList.add('show');
+            clearTimeout(toast._timeout);
+            toast._timeout = setTimeout(() => {
+                toast.classList.remove('show');
+            }, 3000);
+        }
+
+        // ============================================================
+        // KEYBOARD SHORTCUTS
+        // ============================================================
+        document.addEventListener('keydown', (e) => {
+            if (e.ctrlKey && e.key === 'Enter') {
+                e.preventDefault();
+                sendManual();
+            }
+            if (e.ctrlKey && e.key === 'c' && !e.target.closest('input')) {
+                clearFeed();
+            }
+        });
+
+        // ============================================================
+        // LOGGING
+        // ============================================================
+        console.log('VYBR - TikTok Live Tool');
+        console.log('Ready for connection');
+
+        // Log all button clicks for debugging
+        document.querySelectorAll('button').forEach(btn => {
+            btn.addEventListener('click', function(e) {
+                console.log('[UI] Button clicked:', this.textContent.trim());
+            });
+        });
     </script>
 </body>
 </html>
@@ -757,7 +912,6 @@ def run_tiktok_client(username):
             global connected
             connected = True
             socketio.emit('connected', {'status': True})
-            socketio.emit('tts_status', {'message': f'Connected to {username}'})
             print(f"[✓] Connected to {username}")
         
         @client.on(DisconnectEvent)
@@ -765,19 +919,12 @@ def run_tiktok_client(username):
             global connected
             connected = False
             socketio.emit('connected', {'status': False})
-            socketio.emit('tts_status', {'message': 'Disconnected'})
             print("[!] Disconnected")
         
         @client.on(CommentEvent)
         async def on_comment(event):
             try:
-                # Get user info safely
-                user = getattr(event, 'user', None)
-                if user:
-                    nickname = getattr(user, 'nickname', 'Unknown')
-                else:
-                    nickname = 'Unknown'
-                
+                user = getattr(event.user, 'nickname', 'Unknown')
                 comment = getattr(event, 'comment', '')
                 
                 if not comment:
@@ -789,15 +936,15 @@ def run_tiktok_client(username):
                         return
                 
                 entry = {
-                    'user': nickname,
+                    'user': user,
                     'comment': comment,
                     'timestamp': time.time(),
                     'source': 'tiktok'
                 }
                 comment_history.append(entry)
-                users.add(nickname)
+                users.add(user)
                 socketio.emit('new_comment', entry)
-                print(f"[Comment] {nickname}: {comment}")
+                print(f"[Comment] {user}: {comment}")
                 
             except Exception as e:
                 print(f"[!] Comment error: {e}")
@@ -805,31 +952,21 @@ def run_tiktok_client(username):
         @client.on(GiftEvent)
         async def on_gift(event):
             try:
-                user = getattr(event, 'user', None)
-                if user:
-                    nickname = getattr(user, 'nickname', 'Unknown')
-                else:
-                    nickname = 'Unknown'
-                
-                gift = getattr(event, 'gift', None)
-                if gift:
-                    gift_name = getattr(gift, 'name', 'Gift')
-                    count = getattr(gift, 'count', 1)
-                else:
-                    gift_name = 'Gift'
-                    count = 1
+                user = getattr(event.user, 'nickname', 'Unknown')
+                gift = getattr(event.gift, 'name', 'Gift')
+                count = getattr(event.gift, 'count', 1)
                 
                 entry = {
-                    'user': nickname,
-                    'gift': gift_name,
+                    'user': user,
+                    'gift': gift,
                     'count': count,
                     'timestamp': time.time(),
                     'source': 'tiktok'
                 }
                 gift_history.append(entry)
-                users.add(nickname)
+                users.add(user)
                 socketio.emit('new_gift', entry)
-                print(f"[Gift] {nickname} sent {count}x {gift_name}")
+                print(f"[Gift] {user} sent {count}x {gift}")
                 
             except Exception as e:
                 print(f"[!] Gift error: {e}")
@@ -837,33 +974,27 @@ def run_tiktok_client(username):
         @client.on(FollowEvent)
         async def on_follow(event):
             try:
-                user = getattr(event, 'user', None)
-                if user:
-                    nickname = getattr(user, 'nickname', 'Unknown')
-                else:
-                    nickname = 'Unknown'
+                user = getattr(event.user, 'nickname', 'Unknown')
                 
                 entry = {
-                    'user': nickname,
+                    'user': user,
                     'timestamp': time.time(),
                     'source': 'tiktok'
                 }
                 follow_history.append(entry)
-                users.add(nickname)
+                users.add(user)
                 socketio.emit('new_follow', entry)
-                print(f"[Follow] {nickname} followed!")
+                print(f"[Follow] {user} followed!")
                 
             except Exception as e:
                 print(f"[!] Follow error: {e}")
         
-        # Run the client
         print(f"[*] Starting TikTok client for {username}...")
         asyncio.run(client.run())
         
     except Exception as e:
         connected = False
         socketio.emit('error', {'message': str(e)})
-        socketio.emit('tts_status', {'message': f'Error: {str(e)}'})
         print(f"[!] Client error: {e}")
 
 @app.route('/')
@@ -883,18 +1014,15 @@ def api_connect():
     if not username:
         return jsonify({'success': False, 'error': 'No username provided'})
     
-    # Remove @ if present
     if username.startswith('@'):
         username = username[1:]
     
     active_username = username
     
-    # Start client in background thread
     client_thread = threading.Thread(target=run_tiktok_client, args=(username,), daemon=True)
     client_thread.start()
     
-    # Wait a moment for connection
-    time.sleep(2)
+    time.sleep(1)
     
     return jsonify({'success': True, 'message': f'Connecting to {username}...'})
 
